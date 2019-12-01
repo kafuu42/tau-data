@@ -21,12 +21,86 @@ from textblob import TextBlob
 from bs4 import BeautifulSoup as bs
 from sklearn.decomposition import LatentDirichletAllocation as LDA
 import re, networkx as nx, matplotlib.pyplot as plt, operator, numpy as np, os, csv, community
-import json, pandas as pd, itertools#, time
+import json, pandas as pd, itertools, time
 from html import unescape
 from nltk import sent_tokenize
 from unidecode import unidecode
-from tqdm import tqdm#, trange
+from tqdm import tqdm, trange
+from twython import TwythonRateLimitError ,Twython
 
+def twitter_connect(Ck, Cs, At, As):
+    try:
+        twitter = Twython(Ck, Cs, At, As)
+        user = twitter.verify_credentials()
+        print('Welcome "%s" you are now connected to twitter server' %user['name'])
+        return twitter
+    except:
+        print("Connection failed, please check your API keys or connection")
+
+def getTweets(twitter, topic, N = 100, lan = None):
+    Tweets, MAX_ATTEMPTS, count, dBreak, next_max_id = [], 3, 0, False, 0
+    for i in range(MAX_ATTEMPTS):
+        if(count>=N or dBreak):
+            print('\nFinished importing %.0f' %count);break
+        if(i == 0):
+            if lan:
+                results=twitter.search(q=topic, lang=lan, count=100, tweet_mode = 'extended')
+            else:
+                results=twitter.search(q=topic, count=100, tweet_mode = 'extended')
+
+            Tweets.extend(results['statuses'])
+            count += len(results['statuses'])
+            if count>N:
+                print("\rNbr of Tweets captured: {}".format(N), end="")
+                Tweets = Tweets[:N]
+                dBreak = True; break
+            else:
+                print("\rNbr of Tweets captured: {}".format(count), end="")
+
+        else:
+            try:
+                if lan:
+                    results=twitter.search(q=topic,include_entities='true',max_id=next_max_id, lang=lan, count=100, tweet_mode = 'extended')
+                else:
+                    results=twitter.search(q=topic,include_entities='true',max_id=next_max_id, count=100, tweet_mode = 'extended')
+
+                Tweets.extend(results['statuses'])
+                count += len(results['statuses'])
+                if count>N:
+                    print("\rNbr of Tweets captured: {}".format(N), end="")
+                    Tweets = Tweets[:N]
+                    dBreak = True; break
+                else:
+                    print("\rNbr of Tweets captured: {}".format(count), end="")
+
+                try:
+                    next_results_url_params=results['search_metadata']['next_results']
+                    next_max_id=next_results_url_params.split('max_id=')[1].split('&')[0]
+                except:
+                    print('\nFinished, no more tweets available for query "%s"' %str(topic), flush = True)
+                    dBreak = True; break
+
+            except TwythonRateLimitError:
+                print('\nRate Limit reached ... sleeping for 15 Minutes', flush = True)
+                for itr in trange(15*60):
+                    time.sleep(1)
+            except:
+                print('\nSomething is not right, retrying ... (attempt = {}/{})'.format(i+1,MAX_ATTEMPTS), flush = True)
+    return Tweets
+
+def loadCorpus(file='', sep=':', dictionary = True):
+    file = open(file, 'r', encoding="utf-8", errors='replace')
+    F = file.readlines()
+    file.close()
+    if dictionary:
+        fix = {}
+        for f in F:
+            k, v = f.split(sep)
+            k, v = k.strip(), v.strip()
+            fix[k] = v
+    else:
+        fix = set( (w.strip() for w in F) )
+    return fix
 
 def twitter_html2csv(fData, fHasil):
     urlPattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
